@@ -1,12 +1,13 @@
 ﻿# AirVantagePowerShellSample.ps1
-# Created by Martin Walder
-# Version 1.0
+# Created by Martin Walder | martin ( at ) waldma.org
+# Version 1.1
 # https://doc.airvantage.net/av/howto/cloud/gettingstarted_api/
+# https://doc.airvantage.net/av/reference/cloud/API/
 
 # AirVantage credentials
 
-$Username = "user@domain.com"
-$Password = "password"
+$AVUsername = ""
+$AVPassword = ""
 
 # AirVantage datacenter -> https://na.airvantage.net (North America), https://eu.airvantage.net (EMEA)
 
@@ -14,42 +15,76 @@ $AVDatacenter = "https://na.airvantage.net"
 
 # API client settings -> https://na.airvantage.net/develop/api/clients
 
-$ClientId = ""
-$SecretKey = ""
+$AVClientId = ""
+$AVSecretKey = ""
 
 # Function Connect-AirVantage - OAUTH authorization code flow
-# https://doc.airvantage.net/av/reference/cloud/API/
 
 Function Connect-AirVantage(){
     param(
         [Parameter(Mandatory=$true)]
-        $Username,
+        $AVDatacenter,
         [Parameter(Mandatory=$true)]
-        $Password,
+        $AVUsername,
         [Parameter(Mandatory=$true)]
-        $ClientId,
+        $AVPassword,
         [Parameter(Mandatory=$true)]
-        $SecretKey
+        $AVClientId,
+        [Parameter(Mandatory=$true)]
+        $AVSecretKey
     )
     $Parameters = @{
         grant_type = "password"
-        username = $Username
-        password = $Password
-        client_id = $ClientId
-        client_secret = $SecretKey
+        username = $AVUsername
+        password = $AVPassword
+        client_id = $AVClientId
+        client_secret = $AVSecretKey
     }
-    ((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/oauth/token" -Body $Parameters).Content | ConvertFrom-Json).access_token
+    $AVAccessToken = ((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/oauth/token" -Body $Parameters).Content | ConvertFrom-Json).access_token
+    if ($AVAccessToken -ne $null){
+        Write-Host -ForegroundColor Yellow "Login successful"
+        return $AVAccessToken
+    }
+}
+
+# Function Disconnect-AirVantage
+
+Function Disconnect-AirVantage(){
+    param(
+        [Parameter(Mandatory=$true)]
+        $AVDatacenter,
+        [Parameter(Mandatory=$true)]
+        $AVAccessToken
+    )
+    if ((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/oauth/expire?access_token=$($AVAccessToken)?access_token=$AVAccessToken").Content -eq '"logout.successful"'){
+        Write-Host -ForegroundColor Yellow "Logout successful"
+    }
+}
+
+# Function List-AirVantageSystems
+
+Function List-AirVantageSystems(){
+    param(
+        [Parameter(Mandatory=$true)]
+        $AVDatacenter,
+        [Parameter(Mandatory=$true)]
+        $AVAccessToken
+    )
+    (((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/v1/systems?access_token=$AVAccessToken").Content | ConvertFrom-Json).items).name
 }
 
 # Function Get-AirVantageSystem
-# https://doc.airvantage.net/av/reference/cloud/API/API-System-v1/
 
 Function Get-AirVantageSystem(){
     param(
         [Parameter(Mandatory=$true)]
-        $Name
+        $AVDatacenter,
+        [Parameter(Mandatory=$true)]
+        $AVSystemName,
+        [Parameter(Mandatory=$true)]
+        $AVAccessToken
     )
-    ((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/v1/systems?name=$($Name)&access_token=$AccessToken").Content | ConvertFrom-Json).items
+    ((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/v1/systems?name=$($AVSystemName)&access_token=$AVAccessToken").Content | ConvertFrom-Json).items
 }
 
 # Function ConvertFrom-UNIXTimestamp
@@ -62,19 +97,16 @@ Function ConvertFrom-UNIXTimestamp(){
     [timezone]::CurrentTimeZone.ToLocalTime(([datetime]'1/1/1970').AddSeconds($Timestamp /1000))
 }
 
-$AccessToken = Connect-AirVantage -Username $Username -Password $Password -ClientId $ClientId -SecretKey $SecretKey
-if ($AccessToken -ne $null){
-    Write-Host -ForegroundColor Yellow "Login successful"
-}
+$AVAccessToken = Connect-AirVantage -AVDatacenter $AVDatacenter -AVUsername $AVUsername -AVPassword $AVPassword -AVClientId $AVClientId -AVSecretKey $AVSecretKey
 
 Write-Host -ForegroundColor Yellow "Registered systems:"
-(((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/v1/systems?access_token=$AccessToken").Content | ConvertFrom-Json).items).name
+List-AirVantageSystems -AVDatacenter $AVDatacenter -AVAccessToken $AVAccessToken
 
 $AVSystemName = Read-Host "`nEnter system's name (not case sensitive)"
 $PingCount = Read-Host "Enter the number of pings you want to send to the gateway"
 
 Write-Host -ForegroundColor Yellow "Collecting device information..."
-$AVOutput = Get-AirVantageSystem -Name $AVSystemName
+$AVOutput = Get-AirVantageSystem -AVDatacenter $AVDatacenter -AVSystemName $AVSystemName -AVAccessToken $AVAccessToken
 
 if ($AVOutput -ne $null){
 
@@ -117,10 +149,11 @@ else{
     Write-Host -ForegroundColor Red "Error: System not found"
 }
 
-if ((Invoke-WebRequest -Method Get -Uri "$AVDatacenter/api/oauth/expire?access_token=$($AccessToken)?access_token=$AccessToken").Content -eq '"logout.successful"'){
-    Write-Host -ForegroundColor Yellow "Logout successful"
-}
+# Logout
+
+Disconnect-AirVantage -AVDatacenter $AVDatacenter -AVAccessToken $AVAccessToken
 
 # Cleanup variables
-Clear-Variable -Name AirVantage* -Force
+
+Clear-Variable -Name AV* -Force
 Clear-Variable -Name Ping* -Force
